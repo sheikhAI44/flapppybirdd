@@ -65,27 +65,33 @@ function isSupabaseAvailable() {
  * Set up all UI event listeners
  */
 function setupEventListeners() {
-  // Close buttons for modals
+  // Close buttons for modals - ensure they work on mobile with both click and touch events
   for (let i = 0; i < closeButtons.length; i++) {
-    closeButtons[i].addEventListener('click', function() {
-      leaderboardModal.style.display = 'none';
-      submitScoreModal.style.display = 'none';
+    // For mouse clicks
+    closeButtons[i].addEventListener('click', handleModalClose);
+    
+    // For touch devices
+    closeButtons[i].addEventListener('touchend', function(e) {
+      e.preventDefault(); // Prevent default behavior
+      handleModalClose();
     });
   }
 
   // Play Again button
   if (playAgainButton) {
-    playAgainButton.addEventListener('click', function() {
-      leaderboardModal.style.display = 'none';
-      restartGame();
+    playAgainButton.addEventListener('click', handlePlayAgain);
+    playAgainButton.addEventListener('touchend', function(e) {
+      e.preventDefault();
+      handlePlayAgain();
     });
   }
 
   // Skip submission button
   if (skipSubmitButton) {
-    skipSubmitButton.addEventListener('click', function() {
-      submitScoreModal.style.display = 'none';
-      showLeaderboard();
+    skipSubmitButton.addEventListener('click', handleSkipSubmit);
+    skipSubmitButton.addEventListener('touchend', function(e) {
+      e.preventDefault();
+      handleSkipSubmit();
     });
   }
 
@@ -118,15 +124,82 @@ function setupEventListeners() {
     });
   }
 
-  // Close modals when clicking outside
-  window.addEventListener('click', function(event) {
-    if (event.target === leaderboardModal) {
-      leaderboardModal.style.display = 'none';
-    }
-    if (event.target === submitScoreModal) {
-      submitScoreModal.style.display = 'none';
+  // Close modals when clicking outside - for both click and touch
+  window.addEventListener('click', handleOutsideClick);
+  window.addEventListener('touchend', function(e) {
+    // Only if touch ended on the modal background (not its content)
+    if (e.target === leaderboardModal || e.target === submitScoreModal) {
+      e.preventDefault();
+      handleOutsideClick(e);
     }
   });
+  
+  // Add additional close button functionality for mobile
+  addExtraMobileCloseButton();
+}
+
+/**
+ * Handle modal close button clicks
+ */
+function handleModalClose() {
+  if (leaderboardModal) leaderboardModal.style.display = 'none';
+  if (submitScoreModal) submitScoreModal.style.display = 'none';
+}
+
+/**
+ * Handle play again button click
+ */
+function handlePlayAgain() {
+  if (leaderboardModal) leaderboardModal.style.display = 'none';
+  restartGame();
+}
+
+/**
+ * Handle skip submit button click
+ */
+function handleSkipSubmit() {
+  if (submitScoreModal) submitScoreModal.style.display = 'none';
+  showLeaderboard();
+}
+
+/**
+ * Handle clicks outside the modal
+ */
+function handleOutsideClick(event) {
+  if (event.target === leaderboardModal) {
+    leaderboardModal.style.display = 'none';
+  }
+  if (event.target === submitScoreModal) {
+    submitScoreModal.style.display = 'none';
+  }
+}
+
+/**
+ * Add an extra close button specifically designed for mobile 
+ */
+function addExtraMobileCloseButton() {
+  // For leaderboard modal
+  if (leaderboardModal) {
+    const modalContent = leaderboardModal.querySelector('.modal-content');
+    if (modalContent) {
+      // Add a clearly visible close button at the bottom for mobile
+      const mobileCloseBtn = document.createElement('button');
+      mobileCloseBtn.textContent = 'Close';
+      mobileCloseBtn.className = 'btn secondary-btn mobile-close-btn';
+      mobileCloseBtn.style.marginTop = '15px';
+      mobileCloseBtn.style.width = '100%';
+      
+      // Add both click and touch events
+      mobileCloseBtn.addEventListener('click', handleModalClose);
+      mobileCloseBtn.addEventListener('touchend', function(e) {
+        e.preventDefault();
+        handleModalClose();
+      });
+      
+      // Append to modal content
+      modalContent.appendChild(mobileCloseBtn);
+    }
+  }
 }
 
 /**
