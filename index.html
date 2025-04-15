@@ -1,0 +1,85 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Flappy Bird Clone</title>
+  <link rel="stylesheet" href="style.css">
+  
+  <!-- Load Supabase JS library first -->
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+  
+  <!-- Load p5.js -->
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/p5.js/1.4.0/p5.min.js"></script>
+</head>
+<body>
+  <div id="game-container">
+    <!-- Game canvas will be created here by p5.js -->
+  </div>
+  
+  <!-- Leaderboard Modal -->
+  <div id="leaderboardModal" class="modal">
+    <div class="modal-content">
+      <span class="close-button" id="closeLeaderboardButton">&times;</span>
+      <h2>Leaderboard</h2>
+      <div id="leaderboardContent">
+        <table id="leaderboardTable" class="leaderboard-table">
+          <thead>
+            <tr>
+              <th>Rank</th>
+              <th>Player</th>
+              <th>Score</th>
+              <th>Date</th>
+            </tr>
+          </thead>
+          <tbody id="leaderboardBody">
+            <!-- Leaderboard entries will be populated here -->
+          </tbody>
+        </table>
+        <div id="leaderboardLoading" class="leaderboard-loading">Loading leaderboard...</div>
+      </div>
+      <div class="submit-actions">
+        <button id="playAgainButton" class="btn primary-btn">Play Again</button>
+      </div>
+    </div>
+  </div>
+  
+  <!-- Score Submission Modal -->
+  <div id="submitScoreModal" class="modal">
+    <div class="modal-content">
+      <span class="close-button">&times;</span>
+      <h2>Submit Your Score</h2>
+      <div id="finalScoreDisplay" class="score-value">Your Score: 0</div>
+      <form id="scoreSubmitForm">
+        <div class="form-group">
+          <label for="playerEmail">Email:</label>
+          <input type="email" id="playerEmail" class="form-control" placeholder="Enter your email" required>
+          <div id="emailError" class="error"></div>
+        </div>
+        <div id="submissionStatus" class="info"></div>
+        <div class="submit-actions">
+          <button type="submit" id="submitScoreButton" class="btn primary-btn">Submit Score</button>
+          <button type="button" id="skipSubmitButton" class="btn secondary-btn">Skip</button>
+        </div>
+      </form>
+    </div>
+  </div>
+  
+  <!-- Game Scripts -->
+  <script src="supabase.js"></script>
+  <script src="leaderboard.js"></script>
+  <script src="sketch.js"></script>
+  
+  <!-- Debug Console -->
+  <script>
+    // Check if Supabase is loaded
+    window.addEventListener('load', function() {
+      if (typeof window.supabase === 'undefined') {
+        console.error('Supabase library failed to load. Some features may not work properly.');
+      } else {
+        console.log('Supabase library loaded successfully.');
+      }
+    });
+  </script>
+</body>
+</html> 
