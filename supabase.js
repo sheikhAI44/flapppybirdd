@@ -3,9 +3,13 @@
  * This file handles all interactions with the Supabase backend.
  */
 
-// Supabase configuration - Replace with your own project details
-const SUPABASE_URL = 'https://phxqyzgmtsnffcdejuhw.supabase.co';
-const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InBoeHF5emdtdHNuZmZjZGVqdWh3Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NDQ2MzMxOTgsImV4cCI6MjA2MDIwOTE5OH0.YQwcPpFLXbIkJh-RJd1j6HiptemeIOZB0MfYn35ScuQ';
+// =====================================================
+// SUPABASE CONFIGURATION
+// =====================================================
+// 🔥 IMPORTANT: Replace these with your actual Supabase project credentials
+// Get them from: Supabase Dashboard → Settings → API
+const SUPABASE_URL = 'https://rvtjznavtnlumptgpftj.supabase.co';
+const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InJ2dGp6bmF2dG5sdW1wdGdwZnRqIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NTAxOTYzNTMsImV4cCI6MjA2NTc3MjM1M30.NJWhyE5dqtV7Ps1hto1hNw_v6xP3Ix2FaLK_nLq6KGI';
 
 // Database configuration
 const TABLE_NAME = 'scores'; // Make sure this matches your Supabase table name
@@ -17,12 +21,15 @@ let supabaseClient = null;
 let currentUserEmail = '';
 let connectionAttempted = false;
 
+// =====================================================
+// CONNECTION STATUS & CONFIGURATION
+// =====================================================
 // Status flags
 let tableExists = false;
 let supabaseConnected = false;
 let creatingTable = false;
 
-// Offline mode support
+// Offline mode support  
 let offlineMode = false;
 let localScores = [];
 
@@ -31,29 +38,120 @@ const MAX_RETRIES = 3;
 let retryCount = 0;
 let lastCheckTime = 0;
 
+// Network monitoring
+let isOnline = navigator.onLine;
+let connectionQuality = 'unknown'; // 'good', 'poor', 'offline'
+let lastSuccessfulRequest = null;
+
+// User feedback system
+const FEEDBACK_MESSAGES = {
+  CONNECTING: 'Connecting to leaderboard...',
+  CONNECTED: 'Connected to online leaderboard!',
+  OFFLINE: 'Playing offline - scores saved locally',
+  SYNC_SUCCESS: 'Score synced to online leaderboard!',
+  SYNC_FAILED: 'Score saved locally, will sync when online',
+  RATE_LIMITED: 'Too many submissions. Please wait before submitting again.',
+  INVALID_SCORE: 'Invalid score detected. Please play fairly.',
+  NETWORK_ERROR: 'Network connection issues. Scores saved locally.'
+};
+
+// =====================================================
+// INITIALIZATION & NETWORK MONITORING
+// =====================================================
+
 // Initialize Supabase client when the window loads
 function initSupabase() {
   try {
+    console.log('🚀 Initializing Supabase integration...');
+    
     // Load local scores from localStorage
     loadLocalScores();
+    
+    // Set up network monitoring
+    setupNetworkMonitoring();
+    
+    // Validate configuration
+    if (!SUPABASE_URL.startsWith('https://') || SUPABASE_URL.includes('YOUR_SUPABASE')) {
+      throw new Error('Supabase URL not configured. Please update SUPABASE_URL with your project URL.');
+    }
+    
+    if (!SUPABASE_ANON_KEY.startsWith('eyJ') || SUPABASE_ANON_KEY.includes('YOUR_SUPABASE')) {
+      throw new Error('Supabase API key not configured. Please update SUPABASE_ANON_KEY with your anon key.');
+    }
     
     // Try to initialize Supabase
     if (window.supabase) {
       supabaseClient = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
       supabaseConnected = true;
-      console.log('Supabase client initialized successfully');
+      console.log('✅ Supabase client initialized successfully');
       
       // Verify if the table exists
       verifyTableAndSetMode();
     } else {
-      connectionAttempted = true;
-      offlineMode = true;
-      console.error('Supabase library not found. Running in offline mode.');
+      throw new Error('Supabase library not loaded. Check if the CDN is accessible.');
     }
   } catch (error) {
     connectionAttempted = true;
     offlineMode = true;
-    console.error('Error initializing Supabase client:', error);
+    console.error('❌ Supabase initialization failed:', error.message);
+    displayUserFeedback(FEEDBACK_MESSAGES.OFFLINE);
+    
+    // Still provide helpful instructions
+    if (error.message.includes('not configured')) {
+      displayConfigurationInstructions();
+    }
+  }
+}
+
+/**
+ * Set up network connection monitoring
+ */
+function setupNetworkMonitoring() {
+  // Monitor online/offline status
+  window.addEventListener('online', () => {
+    isOnline = true;
+    console.log('📶 Network connection restored');
+    if (offlineMode && supabaseConnected) {
+      // Try to reconnect and sync
+      setTimeout(verifyTableAndSetMode, 1000);
+    }
+  });
+  
+  window.addEventListener('offline', () => {
+    isOnline = false;
+    connectionQuality = 'offline';
+    console.log('📵 Network connection lost - switching to offline mode');
+    displayUserFeedback(FEEDBACK_MESSAGES.OFFLINE);
+  });
+  
+  // Test connection quality periodically
+  setInterval(testConnectionQuality, 30000); // Every 30 seconds
+}
+
+/**
+ * Test network connection quality
+ */
+async function testConnectionQuality() {
+  if (!isOnline || !supabaseConnected) return;
+  
+  const startTime = Date.now();
+  try {
+    // Simple ping test to Supabase
+    const { error } = await supabaseClient
+      .from(TABLE_NAME)
+      .select('id')
+      .limit(1);
+    
+    const responseTime = Date.now() - startTime;
+    
+    if (error) {
+      connectionQuality = 'poor';
+    } else {
+      connectionQuality = responseTime < 1000 ? 'good' : 'poor';
+      lastSuccessfulRequest = Date.now();
+    }
+  } catch (e) {
+    connectionQuality = 'poor';
   }
 }
 
@@ -87,110 +185,14 @@ async function verifyTableAndSetMode() {
 
 /**
  * Create table using the SQL from supabase_setup.sql
+ * NOTE: This function cannot create tables from the client side.
+ * Tables must be created manually in the Supabase dashboard.
  */
 async function createTableFromSql() {
-  if (!supabaseClient || creatingTable || retryCount >= MAX_RETRIES) return;
-  
-  creatingTable = true;
-  retryCount++;
-  
-  try {
-    console.log(`Attempt ${retryCount}/${MAX_RETRIES} to create scores table...`);
-    
-    // Execute the SQL
-    const { error } = await supabaseClient.rpc('exec_sql', {
-      query: `
-        CREATE TABLE IF NOT EXISTS public.scores (
-            id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
-            email TEXT NOT NULL,
-            score INTEGER NOT NULL,
-            created_at TIMESTAMP WITH TIME ZONE DEFAULT now()
-        );
-        
-        ALTER TABLE public.scores ENABLE ROW LEVEL SECURITY;
-        
-        CREATE POLICY "Allow anyone to insert scores" 
-            ON public.scores
-            FOR INSERT
-            TO anon
-            WITH CHECK (true);
-        
-        CREATE POLICY "Allow anyone to read all scores" 
-            ON public.scores
-            FOR SELECT
-            TO anon
-            USING (true);
-        
-        CREATE INDEX IF NOT EXISTS scores_score_desc_idx ON public.scores (score DESC);
-      `
-    });
-    
-    if (error) {
-      console.error('Failed to create table:', error);
-      
-      // Retry with execute_sql
-      try {
-        const { error: execError } = await supabaseClient.rpc('execute_sql', {
-          sql_query: `
-            CREATE TABLE IF NOT EXISTS public.scores (
-                id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
-                email TEXT NOT NULL,
-                score INTEGER NOT NULL,
-                created_at TIMESTAMP WITH TIME ZONE DEFAULT now()
-            );
-            
-            ALTER TABLE public.scores ENABLE ROW LEVEL SECURITY;
-            
-            CREATE POLICY "Allow anyone to insert scores" 
-                ON public.scores
-                FOR INSERT
-                TO anon
-                WITH CHECK (true);
-            
-            CREATE POLICY "Allow anyone to read all scores" 
-                ON public.scores
-                FOR SELECT
-                TO anon
-                USING (true);
-          `
-        });
-        
-        if (execError) {
-          throw execError;
-        }
-      } catch (e) {
-        console.error('Failed to create table with execute_sql:', e);
-        throw e;
-      }
-    }
-    
-    // Verify the table was created
-    const exists = await checkTableExists();
-    
-    if (exists) {
-      console.log('Table created successfully!');
-      tableExists = true;
-      offlineMode = false;
-      // Try to sync any offline scores now that the table exists
-      syncOfflineScores();
-      return true;
-    } else {
-      console.error('Failed to create table. Will run in offline mode.');
-      return false;
-    }
-  } catch (error) {
-    console.error('Error creating table:', error);
-    return false;
-  } finally {
-    creatingTable = false;
-    
-    // If we failed and have retries left, try again after a delay
-    if (!tableExists && retryCount < MAX_RETRIES) {
-      setTimeout(createTableFromSql, 2000);
-    } else if (!tableExists) {
-      displayTableSetupInstructions();
-    }
-  }
+  // Tables cannot be created from client-side code for security reasons
+  // Display setup instructions immediately
+  displayTableSetupInstructions();
+  return false;
 }
 
 /**
@@ -272,50 +274,71 @@ async function syncOfflineScores() {
   saveLocalScores();
 }
 
+// =====================================================
+// USER FEEDBACK & SETUP FUNCTIONS
+// =====================================================
+
+/**
+ * Display user feedback messages in the UI and console
+ */
+function displayUserFeedback(message, type = 'info') {
+  // Console logging with emojis for better visibility
+  const emoji = {
+    'info': 'ℹ️',
+    'success': '✅',
+    'warning': '⚠️',
+    'error': '❌'
+  };
+  
+  console.log(`${emoji[type]} ${message}`);
+  
+  // Try to display in UI if submission status element exists
+  const statusElement = document.getElementById('submissionStatus');
+  if (statusElement) {
+    statusElement.textContent = message;
+    statusElement.className = `info ${type}`;
+    
+    // Auto-clear after 5 seconds unless it's an error
+    if (type !== 'error') {
+      setTimeout(() => {
+        if (statusElement.textContent === message) {
+          statusElement.textContent = '';
+        }
+      }, 5000);
+    }
+  }
+}
+
+/**
+ * Display configuration instructions
+ */
+function displayConfigurationInstructions() {
+  console.info('%c 🔧 CONFIGURATION REQUIRED', 'font-size: 16px; font-weight: bold; color: orange;');
+  console.info('Your Supabase credentials need to be configured in supabase.js');
+  console.info('1. Go to https://app.supabase.com/');
+  console.info('2. Select your project → Settings → API');
+  console.info('3. Copy your Project URL and anon/public key');
+  console.info('4. Update SUPABASE_URL and SUPABASE_ANON_KEY in supabase.js');
+}
+
 /**
  * Display instructions for setting up the scores table
  */
 function displayTableSetupInstructions() {
-  console.error(`Table '${TABLE_NAME}' does not exist in your Supabase project.`);
-  console.info('%c IMPORTANT: Leaderboard Setup Instructions', 'font-size: 16px; font-weight: bold; color: blue;');
-  console.info('To set up the leaderboard, you need to create the scores table in your Supabase project.');
-  console.info('1. Log in to your Supabase dashboard at https://app.supabase.com/');
-  console.info('2. Select your project');
-  console.info('3. Go to the "SQL Editor" section');
-  console.info('4. Create a new query and paste the following SQL:');
-  console.info(`%c
-CREATE TABLE IF NOT EXISTS public.scores (
-  id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
-  email TEXT NOT NULL,
-  score INTEGER NOT NULL,
-  created_at TIMESTAMP WITH TIME ZONE DEFAULT now()
-);
-
-ALTER TABLE public.scores ENABLE ROW LEVEL SECURITY;
-
-CREATE POLICY "Allow anyone to insert scores" 
-  ON public.scores
-  FOR INSERT
-  TO anon
-  WITH CHECK (true);
-
-CREATE POLICY "Allow anyone to read all scores" 
-  ON public.scores
-  FOR SELECT
-  TO anon
-  USING (true);
-
-CREATE INDEX IF NOT EXISTS scores_score_desc_idx ON public.scores (score DESC);
-  `, 'background-color: #f0f0f0; padding: 8px; border-radius: 4px;');
-  console.info('5. Click "Run" to execute the SQL and create the table');
-  console.info('6. Refresh the game page after creating the table');
+  console.error(`❌ Table '${TABLE_NAME}' does not exist in your Supabase project.`);
+  console.info('%c 📋 DATABASE SETUP REQUIRED', 'font-size: 16px; font-weight: bold; color: blue;');
+  console.info('Follow these steps to set up your leaderboard database:');
   console.info('');
-  console.info('%c ADVANCED: Direct PostgreSQL Connection', 'font-size: 16px; font-weight: bold; color: green;');
-  console.info('If you prefer to use direct PostgreSQL connection, you can use the following connection string:');
-  console.info('postgresql://postgres.phxqyzgmtsnffcdejuhw:[YOUR-PASSWORD]@aws-0-ap-southeast-1.pooler.supabase.com:5432/postgres');
-  console.info('Replace [YOUR-PASSWORD] with your actual database password.');
-  console.info('Note: Direct PostgreSQL connections should only be used in server-side code, not in the browser.');
-  console.info('%c NOTE: Until the table is created, the game will run in offline mode.', 'font-weight: bold; color: orange;');
+  console.info('1. 🌐 Go to https://app.supabase.com/');
+  console.info('2. 🎯 Select your project');
+  console.info('3. 📝 Go to "SQL Editor" in the left sidebar');
+  console.info('4. ➕ Click "New Query"');
+  console.info('5. 📋 Copy and paste the complete SQL from supabase_setup.sql');
+  console.info('6. ▶️ Click "Run" to execute the setup');
+  console.info('7. 🔄 Refresh this page after setup is complete');
+  console.info('');
+  console.info('%c 💡 The setup includes security, performance optimizations, and data validation!', 'font-weight: bold; color: green;');
+  console.info('%c ⏳ Until setup is complete, the game runs in offline mode.', 'font-weight: bold; color: orange;');
 }
 
 /**
@@ -340,10 +363,29 @@ async function checkTableExists() {
   }
 }
 
+// =====================================================
+// APPLICATION INITIALIZATION
+// =====================================================
+
 // Initialize on load
 window.addEventListener('load', () => {
+  console.log('🎮 Flappy Bird Leaderboard System Initializing...');
+  
+  // Start initialization process
   initSupabase();
   setupPeriodicTableCheck();
+  
+  // Show initialization status after a brief delay
+  setTimeout(() => {
+    const status = getSetupStatus();
+    console.log('📊 Setup Status:', status);
+    
+    if (status.online) {
+      console.log('🌐 Online leaderboard active!');
+    } else {
+      console.log('📱 Running in offline mode');
+    }
+  }, 2000);
 });
 
 /**
@@ -402,136 +444,279 @@ function getSetupStatus() {
   };
 }
 
+// =====================================================
+// ENHANCED SCORE SUBMISSION WITH VALIDATION
+// =====================================================
+
 /**
- * Submit a score directly to Supabase
+ * Validate score and email before submission
+ * @param {string} email - Player's email
+ * @param {number} score - Score value
+ * @returns {Object} - Validation result
+ */
+function validateScoreSubmission(email, score) {
+  const errors = [];
+  
+  // Email validation
+  if (!email || typeof email !== 'string') {
+    errors.push('Email is required');
+  } else if (!isValidEmail(email)) {
+    errors.push('Invalid email format');
+  }
+  
+  // Score validation
+  if (typeof score !== 'number' || isNaN(score)) {
+    errors.push('Score must be a valid number');
+  } else if (score < 0) {
+    errors.push('Score cannot be negative');
+  } else if (score > 10000) {
+    errors.push('Score seems unrealistic (max: 10000)');
+  }
+  
+  return {
+    isValid: errors.length === 0,
+    errors: errors
+  };
+}
+
+/**
+ * Submit a score directly to Supabase with comprehensive error handling
  * @param {string} email - Player's email
  * @param {number} score - Score value
  * @returns {Promise<Object>} - Result of the submission
  */
 async function submitScoreToSupabase(email, score) {
+  // Pre-submission validation
+  const validation = validateScoreSubmission(email, score);
+  if (!validation.isValid) {
+    return { 
+      success: false, 
+      error: validation.errors.join(', '),
+      type: 'validation' 
+    };
+  }
+  
   if (!supabaseClient || !tableExists) {
-    return { success: false, error: 'Supabase not available' };
+    return { 
+      success: false, 
+      error: 'Database not available', 
+      type: 'connection' 
+    };
+  }
+  
+  // Check network connectivity
+  if (!isOnline) {
+    return { 
+      success: false, 
+      error: FEEDBACK_MESSAGES.NETWORK_ERROR,
+      type: 'network' 
+    };
   }
   
   try {
     // Store current user's email for highlighting in the leaderboard
     currentUserEmail = email;
     
-    // Insert the new score record
-    console.log(`Inserting score ${score} for ${email} into Supabase table`);
+    // Show progress feedback
+    displayUserFeedback('Submitting score to leaderboard...', 'info');
     
+    console.log(`📤 Submitting score ${score} for ${email}...`);
+    
+    const startTime = Date.now();
     const { data, error } = await supabaseClient
       .from(TABLE_NAME)
-      .insert([
-        { email, score }
-      ])
+      .insert([{ email, score }])
       .select();
     
+    const responseTime = Date.now() - startTime;
+    console.log(`⏱️ Submission completed in ${responseTime}ms`);
+    
     if (error) {
-      console.error('Database error when submitting score:', error);
+      console.error('❌ Database error:', error);
       
-      // Check for specific error types
+      // Handle specific database errors with user-friendly messages
       if (error.code === '42P01') {
         tableExists = false;
         offlineMode = true;
         return { 
           success: false, 
-          error: "Table not found. Switched to offline mode." 
+          error: "Database table not found. Switched to offline mode.",
+          type: 'database' 
         };
       } else if (error.code === '23505') {
         return { 
           success: false, 
-          error: "You've already submitted this score." 
+          error: "Duplicate score detected. Each score can only be submitted once.",
+          type: 'duplicate' 
         };
       } else if (error.code === '23502') {
         return { 
           success: false, 
-          error: "Missing required information (email or score)." 
+          error: "Missing required information.",
+          type: 'validation' 
+        };
+      } else if (error.message && error.message.includes('check constraint')) {
+        return { 
+          success: false, 
+          error: FEEDBACK_MESSAGES.INVALID_SCORE,
+          type: 'validation' 
+        };
+      } else if (error.message && error.message.includes('policy')) {
+        return { 
+          success: false, 
+          error: FEEDBACK_MESSAGES.RATE_LIMITED,
+          type: 'rate_limit' 
         };
       } else if (error.message && (error.message.includes('not found') || error.message.includes('does not exist'))) {
         tableExists = false;
         offlineMode = true;
         return { 
           success: false, 
-          error: "The scores table doesn't exist. Switched to offline mode." 
+          error: "Database table not found. Switched to offline mode.",
+          type: 'database' 
         };
       }
       
       throw error;
     }
     
-    return { success: true, data };
-  } catch (error) {
-    console.error('Error submitting score to Supabase:', error);
+    // Success!
+    lastSuccessfulRequest = Date.now();
+    console.log('✅ Score submitted successfully!', data);
+    displayUserFeedback(FEEDBACK_MESSAGES.SYNC_SUCCESS, 'success');
     
-    // Handle network errors
-    if (error.message && error.message.includes('Failed to fetch')) {
+    return { 
+      success: true, 
+      data: data,
+      responseTime: responseTime 
+    };
+    
+  } catch (error) {
+    console.error('❌ Submission error:', error);
+    
+    // Handle network and connection errors
+    if (error.message && (error.message.includes('Failed to fetch') || error.message.includes('NetworkError'))) {
+      connectionQuality = 'poor';
       return { 
         success: false, 
-        error: "Network error. Please check your internet connection." 
+        error: FEEDBACK_MESSAGES.NETWORK_ERROR,
+        type: 'network' 
+      };
+    } else if (error.name === 'AbortError') {
+      return { 
+        success: false, 
+        error: "Request timed out. Please try again.",
+        type: 'timeout' 
       };
     }
     
     return { 
       success: false, 
-      error: error.message || 'Failed to submit score to Supabase.' 
+      error: error.message || 'An unexpected error occurred while submitting your score.',
+      type: 'unknown' 
     };
   }
 }
 
 /**
- * Submits a new score to the leaderboard
+ * Main score submission function with comprehensive error handling
  * @param {string} email - Player's email address
  * @param {number} score - Player's final score
- * @returns {Promise} - Resolution indicates success/failure of the operation
+ * @returns {Promise<Object>} - Detailed result of the submission operation
  */
 async function submitScore(email, score) {
   try {
+    console.log(`🎯 Starting score submission: ${score} for ${email}`);
+    
     // Always save locally first for reliability
     saveScoreLocally(email, score);
+    displayUserFeedback('Score saved locally...', 'info');
     
-    // Check if we're in offline mode
+    // Check if we're in offline mode or if setup is incomplete
     const status = getSetupStatus();
     if (!status.online) {
+      displayUserFeedback(FEEDBACK_MESSAGES.OFFLINE, 'warning');
       return { 
         success: true, 
         offlineMode: true,
-        message: "Score saved locally. Leaderboard is in offline mode."
+        message: FEEDBACK_MESSAGES.OFFLINE,
+        localRank: getLocalRank(email, score)
       };
     }
     
     // Try to submit to Supabase
+    displayUserFeedback('Connecting to online leaderboard...', 'info');
     const result = await submitScoreToSupabase(email, score);
     
     if (!result.success) {
-      return { 
-        success: true, 
-        offlineMode: true,
-        error: result.error,
-        message: "Score saved locally. Will sync to online leaderboard when available."
-      };
+      // Handle different types of errors appropriately
+      const errorType = result.type || 'unknown';
+      
+      if (errorType === 'rate_limit') {
+        displayUserFeedback(result.error, 'warning');
+        return {
+          success: false,
+          offlineMode: false,
+          error: result.error,
+          message: result.error
+        };
+      } else if (errorType === 'validation') {
+        displayUserFeedback(result.error, 'error');
+        return {
+          success: false,
+          offlineMode: false,
+          error: result.error,
+          message: result.error
+        };
+      } else {
+        // Network or database issues - fall back to offline mode
+        displayUserFeedback(FEEDBACK_MESSAGES.SYNC_FAILED, 'warning');
+        return { 
+          success: true, 
+          offlineMode: true,
+          error: result.error,
+          message: FEEDBACK_MESSAGES.SYNC_FAILED,
+          localRank: getLocalRank(email, score)
+        };
+      }
     }
     
-    // Mark the local score as synced
+    // Success! Mark the local score as synced
     markScoreAsSynced(email, score);
     
     return { 
       success: true, 
       offlineMode: false,
       data: result.data,
-      message: "Score submitted to online leaderboard successfully!"
+      message: FEEDBACK_MESSAGES.SYNC_SUCCESS,
+      responseTime: result.responseTime
     };
-  } catch (error) {
-    console.error('Error in submitScore:', error);
     
-    // Fallback to local storage
+  } catch (error) {
+    console.error('❌ Unexpected error in submitScore:', error);
+    
+    // Fallback to local storage with error details
+    displayUserFeedback(FEEDBACK_MESSAGES.SYNC_FAILED, 'warning');
     return { 
       success: true, 
       offlineMode: true,
       error: error.message,
-      message: "Score saved locally. Could not connect to online leaderboard."
+      message: FEEDBACK_MESSAGES.SYNC_FAILED,
+      localRank: getLocalRank(email, score)
     };
   }
+}
+
+/**
+ * Get the rank of a score in the local leaderboard
+ * @param {string} email - Player's email
+ * @param {number} score - Score value
+ * @returns {number} - Rank in local leaderboard
+ */
+function getLocalRank(email, score) {
+  const sortedScores = [...localScores].sort((a, b) => b.score - a.score);
+  const rank = sortedScores.findIndex(s => s.email === email && s.score === score) + 1;
+  return rank || localScores.length + 1;
 }
 
 /**
@@ -591,67 +776,116 @@ function generateLocalId() {
 }
 
 /**
- * Retrieves the top scores from the leaderboard
+ * Retrieves the top scores from the leaderboard with enhanced error handling
  * @param {number} limit - Maximum number of scores to retrieve (default: 10)
- * @returns {Promise} - Resolution contains the leaderboard data
+ * @returns {Promise<Object>} - Comprehensive leaderboard data with metadata
  */
 async function getLeaderboard(limit = 10) {
   try {
+    console.log(`🏆 Fetching leaderboard (limit: ${limit})`);
+    
     // Check if we're in offline mode
     const status = getSetupStatus();
     
     // If offline mode or not ready, return local scores
     if (status.offlineMode || !status.online) {
+      console.log('📱 Using local leaderboard');
       return getLocalLeaderboard(limit);
     }
     
-    // Get top scores from Supabase
-    console.log(`Fetching top ${limit} scores from Supabase`);
-    const { data, error } = await supabaseClient
-      .from(TABLE_NAME)
-      .select('id, email, score, created_at')
-      .order('score', { ascending: false })
-      .limit(limit);
+    // Check network connectivity
+    if (!isOnline) {
+      console.log('📵 No network connection, using local leaderboard');
+      return getLocalLeaderboard(limit);
+    }
+    
+    // Get top scores from Supabase using optimized function
+    console.log(`🌐 Fetching top ${limit} scores from online database...`);
+    const startTime = Date.now();
+    
+    let data, error;
+    
+    // Try to use the optimized function first
+    try {
+      const result = await supabaseClient.rpc('get_top_scores', { limit_count: limit });
+      data = result.data;
+      error = result.error;
+    } catch (rpcError) {
+      // Fall back to regular table query if RPC function doesn't exist
+      console.log('🔄 RPC function not available, using direct table query');
+      const result = await supabaseClient
+        .from(TABLE_NAME)
+        .select('id, email, score, created_at')
+        .order('score', { ascending: false })
+        .order('created_at', { ascending: true }) // Tie-breaker: earlier submission wins
+        .limit(limit);
+      
+      data = result.data;
+      error = result.error;
+    }
+    
+    const responseTime = Date.now() - startTime;
+    console.log(`⏱️ Leaderboard fetched in ${responseTime}ms`);
     
     if (error) {
-      console.error('Database error when fetching leaderboard:', error);
+      console.error('❌ Database error when fetching leaderboard:', error);
       
       // Check for specific error types
       if (error.code === '42P01' || (error.message && error.message.includes('does not exist'))) {
         tableExists = false;
         offlineMode = true;
-        
-        // Fall back to local leaderboard
+        console.log('🔄 Table not found, switching to offline mode');
         return getLocalLeaderboard(limit);
       }
       
-      throw error;
+      // For other errors, still fall back to local
+      console.log('🔄 Database error, falling back to local leaderboard');
+      return getLocalLeaderboard(limit);
     }
+    
+    // Update connection quality based on response time
+    connectionQuality = responseTime < 1000 ? 'good' : 'poor';
+    lastSuccessfulRequest = Date.now();
     
     // If we get an empty array but no error, it means the table exists but has no data
     if (!data || data.length === 0) {
+      console.log('📊 Online leaderboard is empty');
       return {
         success: true,
         online: true,
-        data: []
+        data: [],
+        responseTime: responseTime,
+        connectionQuality: connectionQuality
       };
     }
+    
+    console.log(`✅ Successfully fetched ${data.length} scores from online leaderboard`);
     
     return { 
       success: true,
       online: true, 
-      data: data.map(entry => ({
+      data: data.map((entry, index) => ({
         ...entry,
-        // Mask the email for privacy (show only first character and domain)
+        // Add rank if not provided by RPC function
+        rank: entry.rank || (index + 1),
+        // Mask the email for privacy
         maskedEmail: maskEmail(entry.email),
         // Flag if this entry belongs to the current user
         isCurrentUser: entry.email === currentUserEmail
-      }))
+      })),
+      responseTime: responseTime,
+      connectionQuality: connectionQuality,
+      totalScores: data.length
     };
+    
   } catch (error) {
-    console.error('Error fetching leaderboard:', error);
+    console.error('❌ Error fetching leaderboard:', error);
+    
+    // Update connection quality
+    connectionQuality = 'poor';
     
     // Fall back to local leaderboard
+    console.log('🔄 Falling back to local leaderboard due to error');
     return getLocalLeaderboard(limit);
   }
 }
@@ -723,4 +957,43 @@ function isValidEmail(email) {
  */
 function isSupabaseClientInitialized() {
   return supabaseConnected;
-} 
+}
+
+// =====================================================
+// UTILITY FUNCTIONS FOR LEADERBOARD MANAGEMENT  
+// =====================================================
+
+/**
+ * Clear all local scores (for maintenance/testing)
+ * @returns {boolean} - Whether scores were cleared
+ */
+function clearLocalScores() {
+  const count = localScores.length;
+  localScores = [];
+  saveLocalScores();
+  console.log(`🗑️ Cleared ${count} local scores`);
+  return count > 0;
+}
+
+/**
+ * Get comprehensive statistics about local scores
+ * @returns {Object} - Statistics object
+ */
+function getLocalStats() {
+  if (localScores.length === 0) {
+    return { totalScores: 0, highestScore: 0, averageScore: 0, uniqueEmails: 0 };
+  }
+  
+  const scores = localScores.map(s => s.score);
+  const emails = [...new Set(localScores.map(s => s.email))];
+  
+  return {
+    totalScores: localScores.length,
+    highestScore: Math.max(...scores),
+    lowestScore: Math.min(...scores),
+    averageScore: Math.round(scores.reduce((a, b) => a + b, 0) / scores.length),
+    uniqueEmails: emails.length,
+    syncedScores: localScores.filter(s => s.synced).length,
+    unsyncedScores: localScores.filter(s => !s.synced).length
+  };
+}
